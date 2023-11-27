@@ -3,15 +3,17 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	graphql "github.com/graph-gophers/graphql-go"
+	"github.com/graph-gophers/graphql-go/relay"
 	"gorm.io/gorm"
-	// graphql "github.com/graph-gophers/graphql-go"
-	// "github.com/graph-gophers/graphql-go/relay"
 )
 
 // TODO: Implement Input validation to make sure a valid URL was given.
@@ -20,6 +22,31 @@ const SHORTLEN = 7
 const ALLOWEDCHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 const PRELINKADDRESS = "https://iugo.tech/"
 
+// GraphQL
+const schemaFile = "schema.graphql"
+
+const apolloSandbox = `
+<!DOCTYPE html>
+<html lang="en">
+<body style="margin: 0; overflow-x: hidden; overflow-y: hidden">
+<div id="sandbox" style="height:100vh; width:100vw;"></div>
+<script src="https://embeddable-sandbox.cdn.apollographql.com/_latest/embeddable-sandbox.umd.production.min.js"></script>
+<script>
+new window.EmbeddedSandbox({
+  target: "#sandbox",
+  initialEndpoint: "http://localhost:80/query",
+});
+</script>
+</body>
+ 
+</html>
+`
+
+func enableApolloSandbox(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte(apolloSandbox))
+}
+
+// END GraphQL
 type linkData struct {
 	Link string `json:"link"`
 }
@@ -39,8 +66,9 @@ type DataBaseWrapper struct {
 }
 
 type DataBase interface {
-	createUrlRow(*urls) error
-	getUrlRowByShortUrl(string) (*urls, error)
+	createUrlRow(*UrlDuo) error
+	getUrlRowByShortUrl(string) (*UrlDuo, error)
+	getAllUrlDuos(int) (*[]UrlDuo, error)
 }
 
 type Logic interface {
@@ -48,7 +76,7 @@ type Logic interface {
 	getLongLink(string) (string, error)
 }
 
-type urls struct {
+type UrlDuo struct {
 	ShortUrl   string     `gorm:"short_url"`
 	LongUrl    string     `gorm:"long_url"`
 	ExpireDate *time.Time `gorm:"expire_date"`
@@ -66,11 +94,25 @@ func main() {
 		l:     l,
 		logic: logic,
 	}
+	s, err := os.ReadFile(schemaFile)
+	if err != nil {
+		log.Fatal("GraphQL schema file couldn't be read!")
+	}
+	gqlLogic := GqlLogic{
+		l:  l,
+		db: db,
+	}
+	schema := graphql.MustParseSchema(string(s), &gqlLogic)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 
 	// Routing
 	r := chi.NewRouter()
 	r.Get("/{urlParam}", c.getLongLink)
 	r.Post("/", c.generateShortLink)
+	r.Handle("/query", &relay.Handler{Schema: schema})
+	r.Get("/sandbox", http.HandlerFunc(enableApolloSandbox))
 	http.ListenAndServe(":80", r)
 }
 
@@ -78,7 +120,7 @@ func main() {
 func (logic SimpleLogic) generateShortLink(longLink string) (string, error) {
 	shortLink := calculateShortLink(longLink)
 	expireDate := time.Now().Add(time.Hour * 1).UTC()
-	urlRow := urls{
+	urlRow := UrlDuo{
 		ShortUrl:   shortLink,
 		LongUrl:    longLink,
 		ExpireDate: &expireDate,
@@ -107,7 +149,7 @@ func (logic SimpleLogic) getLongLink(shortLink string) (string, error) {
 	return urlRow.LongUrl, nil
 }
 
-func (dbw DataBaseWrapper) createUrlRow(urlRow *urls) error {
+func (dbw DataBaseWrapper) createUrlRow(urlRow *UrlDuo) error {
 	result := dbw.gormDB.Create(urlRow)
 	if result.Error != nil {
 		return result.Error
@@ -115,13 +157,25 @@ func (dbw DataBaseWrapper) createUrlRow(urlRow *urls) error {
 	return nil
 }
 
-func (dbw DataBaseWrapper) getUrlRowByShortUrl(shortUrl string) (*urls, error) {
-	var urlRow urls
+func (dbw DataBaseWrapper) getUrlRowByShortUrl(shortUrl string) (*UrlDuo, error) {
+	var urlRow UrlDuo
 	result := dbw.gormDB.Where("short_url = ?", shortUrl).First(&urlRow)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	return &urlRow, nil
+}
+
+func (dbw DataBaseWrapper) getAllUrlDuos(last int) (*[]UrlDuo, error) {
+	if last < -1 {
+		return nil, errors.New("invalid number for last query")
+	}
+	var urlDuoSlice []UrlDuo
+	result := dbw.gormDB.Limit(last).Find(&urlDuoSlice)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &urlDuoSlice, nil
 }
 
 func (c Controller) generateShortLink(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,39 @@
+scalar Time
+
+type UrlDuo {
+    short: ID!
+    long: String!
+    expiry: String # expiry: Time
+    # user: User!
+}
+
+type User {
+    id: ID!
+    username: String!
+    urls: [UrlDuo!]
+}
+
+type Query {
+    hello: String!
+    allUrlDuos(last: Int): [UrlDuo!]!
+    urlDuo(shortUrl: ID!): UrlDuo
+    # allUsers(last: Int): [User!]!
+    
+}
+
+type Mutation {
+    createUrlDuo(longUrl: String!): UrlDuo!
+    # deleteUrl(shortUrl: ID!): UrlDuo
+    # createUser(username: String!, password: String!): User!
+    # updateUser(username: String, password: String): User!
+    # deleteUser(): User!
+}
+
+type Subscription {
+}
+
+schema {
+    query: Query
+    mutation: Mutation
+    subscription: Subscription
+}
