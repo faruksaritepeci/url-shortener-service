@@ -24,7 +24,7 @@ type Query {
 type Mutation {
     createUrlDuo(longUrl: String!): UrlDuo!
     # deleteUrl(shortUrl: ID!): UrlDuo
-    # createUser(username: String!, password: String!): User!
+    # createUser(username: String!, email: String!, password: String!): User!
     # updateUser(username: String, password: String): User!
     # deleteUser(): User!
 }
